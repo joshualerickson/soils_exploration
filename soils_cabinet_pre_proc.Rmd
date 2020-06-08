@@ -1,0 +1,237 @@
+---
+title: "Exploring Steep Soil Units"
+author: "Josh Erickson"
+date: "June 4, 2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(sf)
+library(raster)
+library(tidyverse)
+library(exactextractr)
+library(nhdplusTools)
+library(mapview)
+```
+
+This is an exploratory data analysis (EDA) on a handful of steep units on the Kootenai National Forest - Cabinet Ranger District. Contractors are asking to tractor log on some steep ground; however, there are 20+ units ranging in different sizes and locations make it difficult to quickly assess on the ground. This makes it challenging to respond in a relatively short time frame while being resource responsible, i.e. looking out for the best interest of the resource. This is where EDA comes into play. We will explore these units by analyzing remote sensing data and statistical learning techniques. The goal is to hopefully detect a pattern (signal from noise) from which we can then make a more informed decision. This can be challenging with standard practices (e.g. coarse filters) but with the advances in technology and computing power this noisy, non-linear type data is becoming more accessible, e.g. R, Google Earth Engine, etc. 
+
+First step: bring in the geospatial data. I like to have everything in utm's and albers equal area so I will set the crs and projection this way up front. Also, when working with hydrologic data it's nice to bring in all the Hydrological Unit Codes (HUCs) and National Hydrography Dataset (NHD) to give some perspective on watershed boundaries, etc.
+
+```{r, eval=FALSE}
+proj_crs <- "+proj=aea +lat_1=46 +lat_2=48 +lat_0=44 +lon_0=-109.5 +x_0=600000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+
+
+nhdPlushr <- get_nhdplushr("D:/Rcodes/Water_Prediction/Final_paper_water_prediction/hwstreamprediction", "nhdplus.gpkg",
+layers = c("NHDFlowline", "NHDWaterbody", "NHDPlusCatchment", "WBDHU10", "WBDHU12"), overwrite = TRUE, proj = proj_crs)
+
+
+```
+
+
+```{r, eval=FALSE}
+#point to some folders
+hydro_folder <- "D:/documents/Documents/Josh/Documents/GIS/District_H20_exports/Hydro"
+soils_folder <- "D:/documents/Documents/Josh/Documents/GIS/District_H20_exports/Soils"
+lands_folder <- "D:/documents/Documents/Josh/Documents/GIS/District_H20_exports/Lands_District_stuff"
+DEM_folder <- "D:/documents/Documents/Josh/Documents/GIS/District_H20_exports/DEM_Rasters"
+HWpred_folder <- "D:/Rcodes/Water_Prediction/Hird_Water_Prediction/waterD/waterPred/Final_workflow"
+
+#bring in some polygons and lines
+
+purp_m <- read_sf(dsn = "T:/FS/NFS/Kootenai/Program/2400TimberMgmt/GIS/CAB/2430CommercialTimberSales/PurpleMarten/Data/PurpleMarten_TimberSale.gdb") %>%  st_transform(., proj_crs)
+
+buick_divide <- read_sf("T:/FS/NFS/Kootenai/Program/2400TimberMgmt/GIS/CAB/2430CommercialTimberSales/GNA_BuickDivide/BuickDivideUnits_962018.shp") %>%  st_transform(., proj_crs)
+
+elk_gem <- read_sf("T:/FS/NFS/Kootenai/Program/2400TimberMgmt/GIS/CAB/2430CommercialTimberSales/GNA_ElkGem/ElkGem_all.shp") %>%  st_transform(., proj_crs)
+
+lazy_jack <- read_sf("T:/FS/NFS/Kootenai/Program/2400TimberMgmt/GIS/CAB/2430CommercialTimberSales/LazyJack/Lazy_Jack.shp") %>%  st_transform(., proj_crs)
+
+wild_rice <- read_sf("T:/FS/NFS/Kootenai/Program/2400TimberMgmt/GIS/CAB/2430CommercialTimberSales/WildRice/Wild_Rice_TS.shp") %>%  st_transform(., proj_crs)
+
+landtype <- read_sf(paste0(soils_folder, "/landtype_real.shp"),) %>%  st_transform(., proj_crs) %>% st_intersection(., cabinet_district) 
+
+cabinet_district <- read_sf(paste0(lands_folder, "/district_bdy.shp")) %>%  st_transform(., proj_crs) %>% filter(., DISTRICT_N == "Cabinet") %>% select(OBJECTID)
+
+forest_owner <- read_sf(paste0(lands_folder, "/KNF_Ownership.shp")) %>% st_transform(., proj_crs) %>% filter(OWNER == "FS")
+
+cabinet_district <- st_intersection(cabinet_district, forest_owner)
+plot(cabinet_district[1])
+
+cabinet_districtLonLat <- read_sf(paste0(lands_folder, "/district_bdy.shp"))%>%  st_transform(.,"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0 ")
+
+cabinet_districtPrism <- read_sf(paste0(lands_folder, "/district_bdy.shp"))%>%  st_transform(.,"+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs +ellps=GRS80 +towgs84=0,0,0")
+
+NHDflowline <- st_as_sf(nhdPlushr$NHDFlowline) %>% st_intersection(., cabinet_district) 
+
+HUC12 <- st_as_sf(nhdPlushr$WBDHU12) %>% st_intersection(., cabinet_district) 
+
+HUC10 <- st_as_sf(nhdPlushr$WBDHU10) %>% st_intersection(., cabinet_district)
+
+NHDwaterbody <- st_as_sf(nhdPlushr$NHDWaterbody) %>% st_intersection(., cabinet_district) %>% st_transform(.,proj_crs)
+
+NHDcatchment <- st_as_sf(nhdPlushr$NHDPlusCatchment) %>% st_intersection(., cabinet_district)%>% st_transform(.,proj_crs)
+
+NHDcatchment <- st_intersection(st_buffer(NHDcatchment,0), forest_owner)
+
+plot(NHDcatchment[1])
+
+NHDcatchmentSF <- st_as_sf(nhdPlushr$NHDPlusCatchment) %>% st_intersection(., cabinet_district)
+
+#collect rasters
+NDVI_cabinet <- raster("NDVI_cabinet.tif")
+NDVI_cabinet <- projectRaster(NDVI_cabinet, crs = proj_crs, res = 30)
+
+NPP_cabinet <- raster("ALLNPP_cabinet.tif")
+NPP_cabinet <- projectRaster(NPP_cabinet, crs = proj_crs, res = 30)
+
+deficit <- raster(paste0(soils_folder, "/Regional/DEF_30m_wgs_tps_predict_v2Copy.tif")) 
+deficit_cabinet <- crop(deficit, y = cabinet_districtLonLat)
+deficit_cabinet <- projectRaster(deficit_cabinet, crs = proj_crs, res = 30)
+
+cpgPrism <- raster(paste0(HWpred_folder, "/US_Precip_1981-2010_CPG_all.tif")) 
+cpgPrism_cabinet <- crop(cpgPrism, y = cabinet_districtPrism)
+cpgPrism_cabinet <- projectRaster(cpgPrism_cabinet, crs = proj_crs, res = 30)
+
+PRISM <- raster("PRISM.tif")
+PRISM_cabinet <- crop(PRISM, y = cabinet_district)
+PRISM_cabinet <- projectRaster(PRISM_cabinet, crs = proj_crs, res = 30)
+
+SWE <- raster(paste0(soils_folder, "/Regional/snow_apr_1981-2010-normal.tif")) 
+SWE_cabinet <- crop(SWE, y = cabinet_district)
+crs(SWE_cabinet) <- proj_crs
+
+Tmax <- raster(paste0(soils_folder, "/Regional/tmax_1981-2010_normal.tif")) 
+Tmax_cabinet <- crop(Tmax, y = cabinet_district)
+crs(Tmax_cabinet) <- proj_crs
+
+
+Tmin <- raster(paste0(soils_folder, "/Regional/tmin_1981-2010_normal.tif")) 
+Tmin_cabinet <- crop(Tmin, y = cabinet_district)
+crs(Tmin_cabinet) <- proj_crs
+
+
+dem10 <- raster("dem10m.tif")
+slope_cabinet <- crop(dem10, cabinet_district) 
+slope_cabinet <- terrain(slope_cabinet, opt = "slope", unit = "degrees")
+
+slopedeg_cabinet <- terrain(slope_cabinet, opt = "slope") #for hillshade
+
+slope_cabinet <-  tan(slope_cabinet*(pi/180))*100 #for percent slope
+slope_cabinet <- reclassify(slope_cabinet, c(-Inf,0, NA, 150,Inf, NA))
+plot(slope_cabinet)
+
+TPI_cabinet <- crop(dem10, cabinet_district) 
+TPI_cabinet <- terrain(TPI_cabinet, opt = "TPI")
+
+TRI_cabinet <- crop(dem10, cabinet_district) 
+TRI_cabinet <- terrain(TRI_cabinet, opt = "TRI")
+
+aspect_cabinet <- crop(dem10, cabinet_district) 
+aspect_cabinet <- terrain(aspect_cabinet, opt = "aspect")
+
+hillshade_cabinet <- hillShade(slopedeg_cabinet,aspect_cabinet, 40, 270)
+hillshade_cabinet <- crop(hillshade_cabinet, wild_rice)
+dem_crop <- crop(dem10, wild_rice)
+
+```
+
+
+Now let's add some zonal statistics to these polygons that we brought in.
+
+```{r}
+#clean up first
+HUC12 <- st_transform(HUC12, "+proj=aea +lat_1=46 +lat_2=48 +lat_0=44 +lon_0=-109.5 +x_0=600000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs")
+
+
+#need to cast to multipolygon to work with exact_extract
+
+HUC12 <- st_cast(HUC12,"MULTIPOLYGON")
+HUC10 <- st_cast(HUC10,"MULTIPOLYGON")
+NHDcatchment <- st_cast(NHDcatchment,"MULTIPOLYGON")
+HUC12 <- HUC12[,c(9,10,12)]
+HUC10 <- HUC10[,c(7,8,10)]
+NHDcatchment <- NHDcatchment[,4]
+
+```
+
+**Extracting rasters to HUC12**
+
+```{r}
+HUC12$mean_deficit <- exact_extract(deficit_cabinet, HUC12, 'mean')
+HUC12$mean_tpi <- exact_extract(TPI_cabinet, HUC12, 'mean')
+HUC12$mean_tri <- exact_extract(TRI_cabinet, HUC12, 'mean')
+HUC12$mean_npp <- exact_extract(NPP_cabinet, HUC12, 'mean')
+HUC12$mean_ndvi <- exact_extract(NDVI_cabinet, HUC12, 'mean')
+HUC12$mean_swe <- exact_extract(SWE_cabinet, HUC12, 'mean')
+HUC12$mean_Tmax <- exact_extract(Tmax_cabinet, HUC12, 'mean')
+HUC12$mean_Tmin <- exact_extract(Tmin_cabinet, HUC12, 'mean')
+HUC12$mean_slope <- exact_extract(slope_cabinet, HUC12, 'mean')
+HUC12$mean_cpgPRISM <- exact_extract(cpgPrism_cabinet, HUC12, 'mean')
+HUC12$mean_PRISM <- exact_extract(PRISM_cabinet, HUC12, 'mean')
+
+```
+
+**Extracting rasters to NHDcatchment**
+
+```{r}
+NHDcatchment$mean_deficit <- exact_extract(deficit_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_tpi <- exact_extract(TPI_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_tri <- exact_extract(TRI_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_npp <- exact_extract(NPP_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_ndvi <- exact_extract(NDVI_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_swe <- exact_extract(SWE_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_Tmax <- exact_extract(Tmax_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_Tmin <- exact_extract(Tmin_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_slope <- exact_extract(slope_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_cpgPRISM <- exact_extract(cpgPrism_cabinet, NHDcatchment, 'mean')
+NHDcatchment$mean_PRISM <- exact_extract(PRISM_cabinet, NHDcatchment, 'mean')
+
+```
+
+**Extracting rasters to units**
+
+```{r}
+wild_rice$mean_deficit <- exact_extract(deficit_cabinet, wild_rice, 'mean')
+wild_rice$mean_tpi <- exact_extract(TPI_cabinet, wild_rice, 'mean')
+wild_rice$mean_tri <- exact_extract(TRI_cabinet, wild_rice, 'mean')
+wild_rice$mean_npp <- exact_extract(NPP_cabinet, wild_rice, 'mean')
+wild_rice$mean_ndvi <- exact_extract(NDVI_cabinet, wild_rice, 'mean')
+wild_rice$mean_swe <- exact_extract(SWE_cabinet, wild_rice, 'mean')
+wild_rice$mean_Tmax <- exact_extract(Tmax_cabinet, wild_rice, 'mean')
+wild_rice$mean_Tmin <- exact_extract(Tmin_cabinet, wild_rice, 'mean')
+wild_rice$mean_slope <- exact_extract(slope_cabinet, wild_rice, 'mean')
+wild_rice$mean_cpgPRISM <- exact_extract(cpgPrism_cabinet, wild_rice, 'mean')
+wild_rice$mean_PRISM <- exact_extract(PRISM_cabinet, wild_rice, 'mean')
+
+```
+
+**exploring NPP and Deficit**
+
+```{r}
+
+#units from email describing units over 40% grade limitation
+
+wild_rice_steep <- subset(wild_rice, unit %in% c("04A", "04C", "04D", "05B", "08A", "08B", "08C", "08D", "08E", "13", "15A", "15B", "21B", "22A", "23", "25", "26", "29", "30", "32A", "33A"))
+
+wild_rice_steep %>% view()
+
+wild_rice_steep %>% ggplot() + geom_sf(data = wild_rice_steep, aes(fill = cut_interval(mean_npp,4)))
+```
+
+```{r}
+wild_rice_steep %>% ggplot() + geom_sf(data = wild_rice_steep, aes(fill = cut_interval(mean_npp,4)))
+```
+
+
+```{r}
+
+wild_rice_steep %>% ggplot() + geom_point(aes(mean_slope, mean_npp))
+
+NHDcatchment %>% ggplot() + geom_point(aes(mean_slope, mean_npp, color = cut_interval(mean_deficit, 4)))
+
+```
+
+
