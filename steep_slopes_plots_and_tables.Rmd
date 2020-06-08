@@ -1,0 +1,199 @@
+---
+title: "Steep Slopes"
+author: "Josh Erickson and Vince Archer"
+date: "June 5, 2020"
+output: word_document
+always_allow_html: true
+bibliography: steep_slopes.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+library(sf)
+library(tidyverse)
+library(gridExtra)
+library(grid)
+library(ggrepel)
+
+```
+
+## Introduction
+
+Figures and tables used in whitepaper. 
+
+**Figure 1**
+
+```{r fig.width=10, fig.height=5, eval=TRUE, echo=FALSE, fig.align="center"}
+
+p1 <- ggplot(data = wild_rice_steep) +
+  geom_stars(data = hillshade_cabinetS)  +  
+  scale_fill_distiller(palette = "Greys", guide = FALSE) + 
+  new_scale_fill() + theme_void() +
+  geom_sf(data = wild_rice_steep, aes(fill = cut_interval(round(mean_npp),4, dig.lab = 10)), alpha = 0.9) + geom_label_repel(data = wild_units, aes(lon, lat, label = Unit), force = 15, size = 5) + scale_fill_brewer(palette = "RdBu")+ labs(title = "Mean NPP", fill = "Mean NPP") + 
+  theme(plot.title = element_text(hjust = 0.5)) + scale_alpha(guide = 'none')+ geom_label(data = wild_rice_steep, aes(x=min(lon) + 25, y=max(lat), label="bold(Units)"),parse = TRUE,nudge_y = 700, size = 5)
+
+p2 <- ggplot(data = wild_rice_steep) +
+  geom_stars(data = hillshade_cabinetS, show.guides = FALSE)  +  
+  scale_fill_distiller(palette = "Greys", guide = FALSE) + 
+  new_scale_fill() + geom_sf(aes(fill = cut_interval(round(mean_deficit),4, dig.lab = 10)), alpha = 0.9)  + labs(title = "Mean Deficit ", fill = "Mean Deficit") + geom_label_repel(data = wild_units, aes(lon, lat, label = Unit), force = 15, size = 5) + scale_fill_brewer(palette = "RdBu", direction = -1)+ theme_void()+
+  theme(plot.title = element_text(hjust = 0.5)) + scale_alpha(guide = 'none')
+
+gridExtra::grid.arrange(p1, p2, ncol = 2,top=textGrob("Mean NPP and Deficit of Steep Units in Wild Rice", gp=gpar(fontsize=18,fontface=2)))
+```
+  
+  
+When looking at these maps we noticed that low NPP and high Def had some covariation within this dataset. We wanted to explore this a little more since high CWD can have impacts on vegetation physiology, e.g. growth [@hoylman2018hillslope].
+
+**Figure 2**
+
+```{r fig.width=10, fig.height=6, eval=TRUE, echo=FALSE, fig.align="center"}
+
+wild_rice_steep %>% ggplot() + geom_point(aes(mean_deficit, mean_npp, size = cut_interval(Acres,4 ))) + geom_smooth(aes(mean_deficit, mean_npp), method = "lm") + labs(title = "Scatterplot of Mean NPP and Mean Deficit", subtitle = "within the Wild Rice Units", x = "Mean Deficit", y = "Mean NPP", size = "Unit Acres")+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5)) + geom_label(aes(mean_deficit, mean_npp, label = Unit), check_overlap = TRUE, vjust = 1, hjust = 1, size = 3)
+
+```
+
+
+  
+The figure above shows that as you increase CWD you decrease NPP; however, this is a very small sample size (17). This lead us to look at the entire district given the same linear combination.  
+
+**Figure 3**
+
+```{r fig.width=8, fig.height=4, eval=TRUE, echo=FALSE, fig.align="center"}
+
+p3 <- NHDcatchment %>% arrange(desc(mean_Tmin)) %>% 
+ggplot() + geom_point(aes(mean_deficit, mean_npp)) + geom_smooth(aes(mean_deficit, mean_npp),size = 2) + labs( x = "Mean Deficit", y = "Mean NPP")
+
+p4 <- NHDcatchment %>% arrange(mean_Tmin) %>% 
+ggplot() + geom_point(aes(mean_deficit, mean_npp, color = cut_interval(round(mean_Tmin),4)), alpha = 0.6) + geom_smooth(aes(mean_deficit, mean_npp, color = cut_interval(round(mean_Tmin),4)),se = FALSE, size = 2) + labs( x = "Mean Deficit", y = "Mean NPP", color = "Minimum Temperature") +
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5)) + scale_color_brewer(palette = "RdBu") + theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+
+
+grid.arrange(p3,p4, ncol = 2, widths = c(.5, .6),top=textGrob("Scatterplots of Mean NPP and Deficit \n within Cabinet Ranger District",
+                      gp=gpar(fontsize=10,fontface=2)))
+
+grid.rect(width = 1, height = 1, gp = gpar(lwd = 2, col = "black", fill = NA))
+
+```
+
+There are some interesting trends within this district data. There is a 'parabolic' type response in this graph suggesting that these big drivers (e.g. temperature, vegetation growth, water deficit, etc.) can possibly be partioned based on 'growth' sensitivities. The goal would then be to extract these 'big driver' thresholds within our Wild Rice units and see if we can make some unsupervised decisions from there. Thus, we filtered the Wild Rice units by CWD > 300 because this is were we start to see a trend downward in NPP.
+
+
+**Figure 5**
+```{r fig.width=10, fig.height=6, eval=TRUE, echo=FALSE, fig.align="center"}
+
+
+wild_rice_steep %>% filter(mean_deficit > 300) %>%  st_intersection(landtype) %>% ggplot(aes(mean_deficit, mean_npp) ) + geom_point(aes(color = factor(LANDTY)), position = position_dodge(10), size = 4) + geom_smooth(aes(mean_deficit, mean_npp), method = "lm", alpha = 0.1) +
+  scale_color_brewer(palette = "RdBu") +
+  labs(title = "Wild Rice Units > 300 CWD", x = "Mean Deficit of Unit", y = "Mean NPP", color = "Landtype") +
+  geom_text(aes(mean_deficit, mean_npp, label = Unit), check_overlap = TRUE, vjust = 1, hjust = 1.5)
+```
+
+As you can see from above, most of these units have multiple landtypes within them, which may have more impact on growth and resilince given the data. A way to check this is to look at how this range of NPP (i.e., the Wild Rice Units > 300 Deficit) stacks up against the district data.
+
+**Figure 4**
+
+```{r fig.width=10, fig.height=6, eval=TRUE, echo=FALSE, fig.align="center"}
+NHDcatchment %>% arrange(desc(mean_Tmin)) %>% 
+ggplot(aes(mean_deficit, mean_npp)) + geom_point(alpha = 0.2) + 
+  geom_smooth(aes(color = "Best Fit"),size = 2) + scale_color_manual(name = "GAM Best Fit", values = "black")+ 
+  labs(title = "Wild Rice Steep Units Compared to District", x = "Mean CWD", y = "Mean NPP") + 
+  geom_hline(aes(yintercept = 6600, linetype = "6,600"), color = "red", size = 1.5, alpha = 0.4) + geom_hline(aes(yintercept = 7350, linetype = "7,350"), color = "blue", size = 1.5, alpha = 0.4) + scale_linetype_manual(name = "NPP Range", values = c(2, 2), 
+                      guide = guide_legend(override.aes = list(color = c("red", "blue")))) + geom_point(data = wild_rice_steep, aes(mean_deficit, mean_npp, fill = "Units"), color = "red", size = 6, shape=18, alpha = 0.6) + scale_fill_manual(name = "Wild Rice Units", values = "red") + geom_label_repel(data = wild_units,aes(mean_deficit, mean_npp, label = Unit), force = 20, segment.color = "white", segment.size = 1) 
+```
+
+
+**make table**
+
+```{r, eval=FALSE}
+#get centroids
+wild_rice_steep <- wild_rice_steep %>% 
+  mutate(lon = map_dbl(geometry, ~st_point_on_surface(.x)[[1]]),
+         lat = map_dbl(geometry, ~st_point_on_surface(.x)[[2]]))
+```
+
+**Exploring slope relationships**  
+
+```{r eval=FALSE, echo=FALSE}
+
+wild_rice_steep %>% ggplot() + geom_point(aes(mean_slope, mean_npp))
+
+NHDcatchment %>% ggplot() + geom_point(aes(mean_slope, mean_npp, color = cut_interval(mean_deficit, 4)))
+
+```
+
+
+**Summaries**
+```{r eval=FALSE, echo=FALSE}
+
+#proportion of landtype
+
+wild_rice_steep %>% st_intersection(landtype) %>% st_drop_geometry() %>% dplyr::count(LANDTY, wt = Acres) %>% summarise(prop = prop.table(n), name = LANDTY)
+
+#summary stats
+wild_rice_steep %>% st_drop_geometry() %>% summarise(across(starts_with("mean"),list(mean=mean, median=median, sd=sd), na.rm = TRUE, .names = "{col}_{fn}")) %>% view()
+
+```
+
+**Creating Table**
+
+```{r eval=TRUE, echo=FALSE}
+
+wild_units <- wild_rice_steep %>% st_intersection(landtype) %>% st_drop_geometry() %>% select(Unit, system,  Acres, mean_slope, LANDTY,mean_deficit, mean_npp) %>% arrange(Unit) %>% distinct(Unit, mean_npp, .keep_all = TRUE)
+
+wild_units_summary <- wild_units %>% arrange(Unit)
+
+names(wild_units_summary) <- pander::pandoc.strong.return(names(wild_units_summary))
+pander::pander(wild_units_summary, caption = "Wild Rice Skyline Units", emphasize.strong.cols = 1, split.cells = c(.5,.5,.5,.5,.5,.5,.5))
+```
+
+  
+A way to decifer this information is to look at whether or not these type of soils are inherently productive. Therfore, after looking at these soils (552 and 555) it was determined from the literature that these type of soils have high productivity charactaristics associated with them. Whether the normal to high NPP values are coincidence or not needs further investigation. A way to look at this relationship is through some unsupervised multivariate analysis like principal component analysis (PCA). PCA is highly explorative but can be helpful lowering the dimensionality of complex interactions like NPP, Deficit, Slope, Landtype, etc. Thus we looked into the district data to see if there might be a signal that could help us interpret the Wild Rice units. 
+
+```{r eval=FALSE, echo=FALSE}
+NHDcatchment <- st_as_sf(NHDcatchment)
+NHDcatchment <- NHDcatchment %>%  
+  mutate(lon = map_dbl(SHAPE, ~st_point_on_surface(.x)[[1]]),
+         lat = map_dbl(SHAPE, ~st_point_on_surface(.x)[[2]]))
+
+NHDcatchmentLtypes <- st_intersection(st_buffer(NHDcatchment,0), landtype)
+
+NHDcatchmentLtypes <- NHDcatchmentLtypes %>% mutate(SoilClass = factor(cut(NHDcatchmentLtypes$LANDTY, breaks = c(100,200,300,400,500,600,1000))))
+
+
+```
+
+```{r eval=FALSE, echo=FALSE}
+pca_ltypes <- NHDcatchmentLtypes %>% st_drop_geometry()
+pca_ltypes <- pca_ltypes[,c(9:13,15:19,36)]
+pca_ltypes <- na.omit(pca_ltypes)
+pca_ltypes <- pca_ltypes %>% filter(as.integer(SoilClass) != 6)
+cor_table <- data.frame(round(cor(pca_ltypes), 2))
+
+
+```
+```{r eval=FALSE, echo=FALSE, fig.width=1, fig.height=5}
+names(cor_table) <- pander::pandoc.strong.return(names(cor_table))
+pander::pander(cor_table, caption = "Cabinet District Correlation Table", emphasize.strong.cols = 1, split.cells = c(rep(1,10)))
+```
+
+```{r eval=FALSE, echo=FALSE}
+pca_sum <- prcomp(pca_ltypes[,-11], center = TRUE, scale. = TRUE)
+pca_sum_veg <- prcomp(pca_ltypes[,c(1,4,5,6,7)], center = TRUE, scale. = TRUE)
+summary(pca_sum)
+pca_sum$rotation
+```
+```{r eval=TRUE, echo=FALSE}
+pander::pander(summary(pca_sum))
+wild_rice_steep %>% dplyr::group_by(Landtype) %>% dplyr::count(Landtype, wt = Acres)
+```
+
+```{r eval=TRUE, echo=FALSE}
+ggbiplot::ggbiplot(pca_sum, ellipse = TRUE, groups = pca_ltypes$SoilClass)
+
+```
+
+## References
+
