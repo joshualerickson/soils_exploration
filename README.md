@@ -2,4 +2,4 @@
 
 Exploring relationships between remote sensing and units.
 
-! [Alt text] (/steep_units.jpg)
+! [Alt text] (/soils_exploration/steep_units.jpg)
