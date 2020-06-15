@@ -68,7 +68,11 @@ NHDflowline <- st_as_sf(nhdPlushr$NHDFlowline) %>% st_intersection(., cabinet_di
 
 HUC12 <- st_as_sf(nhdPlushr$WBDHU12) %>% st_intersection(., cabinet_district) 
 
+HUC12 <- st_intersection(st_buffer(HUC12,0), forest_owner)
+
 HUC10 <- st_as_sf(nhdPlushr$WBDHU10) %>% st_intersection(., cabinet_district)
+
+HUC10 <- st_intersection(st_buffer(HUC10,0), forest_owner)
 
 NHDwaterbody <- st_as_sf(nhdPlushr$NHDWaterbody) %>% st_intersection(., cabinet_district) %>% st_transform(.,proj_crs)
 
@@ -234,4 +238,9 @@ NHDcatchment %>% ggplot() + geom_point(aes(mean_slope, mean_npp, color = cut_int
 
 ```
 
+**Rename Vars and clean up**
+
+```{r}
+wild_rice_steep <- wild_rice_steep %>% rename(Unit = "unit")
+```
 
