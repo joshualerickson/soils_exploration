@@ -12,7 +12,6 @@ knitr::opts_chunk$set(warning=FALSE, message=FALSE)
 library(sf)
 library(stars)
 library(lwgeom)
-devtools::install_github("r-spatial/stars")
 library(tidyverse)
 library(gridExtra)
 library(grid)
@@ -157,20 +156,6 @@ pander::pander(wild_units_summary, caption = "Wild Rice Skyline Units", emphasiz
 ```
 
   
-A way to decifer this information is to look at whether or not these type of soils are inherently productive. Therfore, after looking at these soils (552 and 555) it was determined from the literature that these type of soils have high productivity charactaristics associated with them. Whether the normal to high NPP values are coincidence or not needs further investigation. A way to look at this relationship is through some unsupervised multivariate analysis like principal component analysis (PCA). PCA is highly explorative but can be helpful lowering the dimensionality of complex interactions like NPP, Deficit, Slope, Landtype, etc. Thus we looked into the district data to see if there might be a signal that could help us interpret the Wild Rice units. 
-
-```{r eval=FALSE, echo=FALSE}
-NHDcatchment <- st_as_sf(NHDcatchment)
-NHDcatchment <- NHDcatchment %>%  
-  mutate(lon = map_dbl(SHAPE, ~st_point_on_surface(.x)[[1]]),
-         lat = map_dbl(SHAPE, ~st_point_on_surface(.x)[[2]]))
-
-NHDcatchmentLtypes <- st_intersection(st_buffer(NHDcatchment,0), landtype)
-
-NHDcatchmentLtypes <- NHDcatchmentLtypes %>% mutate(SoilClass = factor(cut(NHDcatchmentLtypes$LANDTY, breaks = c(100,200,300,400,500,600,1000))))
-
-
-```
 
 ## References
 
